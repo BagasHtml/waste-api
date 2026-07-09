@@ -1,0 +1,62 @@
+// prisma/schema.prisma
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model MasterArea {
+  id           Int           @id @default(autoincrement())
+  name         String        @unique @db.VarChar(191)
+  latitude     Float
+  longitude    Float
+  predictions  PredictionLog[]
+  crowdPermits CrowdPermit[]
+}
+
+model PredictionLog {
+  id               Int        @id @default(autoincrement())
+  areaId           Int
+  area             MasterArea @relation(fields: [areaId], references: [id])
+  prediction_date  DateTime
+  volume_ton       Float
+  confidence_score Float
+  risk_status      String     @db.VarChar(50)
+  createdAt        DateTime   @default(now())
+}
+
+model CrowdPermit {
+  id              Int        @id @default(autoincrement())
+  areaId          Int
+  area            MasterArea @relation(fields: [areaId], references: [id])
+  event_name      String     @db.VarChar(191)
+  event_date      DateTime
+  estimated_crowd Int
+  status          String     @db.VarChar(50)
+  createdAt       DateTime   @default(now())
+}
+
+model OperationalParam {
+  id          Int    @id @default(autoincrement())
+  param_key   String @unique @db.VarChar(191)
+  param_value Float
+}
+
+model FleetInventory {
+  id                     Int    @id @default(autoincrement())
+  truck_type             String @db.VarChar(191)
+  total_units            Int
+  ready_units            Int
+  capacity_per_truck_ton Float
+}
+
+model TpaFacility {
+  id               Int    @id @default(autoincrement())
+  name             String @db.VarChar(191)
+  max_capacity_ton Float
+  current_load_ton Float
+}

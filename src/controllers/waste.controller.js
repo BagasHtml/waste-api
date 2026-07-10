@@ -1,7 +1,5 @@
-// src/controllers/waste.controller.js
 import prisma from '../config/db.js';
 
-// Mengambil semua data sampah
 export const getAllWaste = async (req, res) => {
   try {
     const wastes = await prisma.waste.findMany();
@@ -11,7 +9,6 @@ export const getAllWaste = async (req, res) => {
   }
 };
 
-// Menambahkan data sampah baru
 export const createWaste = async (req, res) => {
   const { type, weight } = req.body;
   try {

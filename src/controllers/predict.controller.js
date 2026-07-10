@@ -1,8 +1,6 @@
-// src/controllers/predict.controller.js
 import prisma from '../config/db.js';
 import { wasteService } from '../services/predict.service.js';
 
-// --- KONSTANTA & HELPER FUNCTIONS ---
 const ALLOWED_LOCATIONS = ["jis", "gbk", "pasar senen", "gang sempit tambora"];
 const TRUCK_CAPACITY_TON = 5;
 const ORGANIC_RATIO = 0.4987;

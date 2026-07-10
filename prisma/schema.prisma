@@ -12,8 +12,9 @@ generator client {
 model MasterArea {
   id           Int           @id @default(autoincrement())
   name         String        @unique @db.VarChar(191)
-  latitude     Float
-  longitude    Float
+  // Tambahkan @default(0) agar tidak null saat dibuat via Studio
+  latitude     Float         @default(0)
+  longitude    Float         @default(0)
   predictions  PredictionLog[]
   crowdPermits CrowdPermit[]
 }

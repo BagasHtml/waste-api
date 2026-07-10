@@ -1,0 +1,199 @@
+# 📚 Waste Intelligence API Documentation
+**Sistem Prediksi Manajemen Sampah DKI Jakarta 2026**
+
+Dokumen ini berisi panduan integrasi antara Backend API dan Frontend Dashboard. Seluruh endpoint telah distandarisasi mengikuti prinsip *Clean Architecture* dan *Type-Safe Contract*.
+
+## 🔐 Autentikasi
+Seluruh endpoint bisnis (kecuali Health Check) dilindungi menggunakan **API Key Authentication**.
+-   **Header Name:** `x-api-key`
+-   **Cara Penggunaan:** Sertakan header pada setiap request. Nilai key disimpan secara aman di environment variable frontend (`VITE_API_KEY`).
+-   **Response Gagal:** Jika key tidak valid/hilang, server mengembalikan `401 Unauthorized`.
+
+> ⚠️ **Security Notice:** Jangan pernah menuliskan API Key secara *hardcoded* di source code frontend. Selalu gunakan environment variable.
+
+---
+
+## 🌐 Base URL & Environment
+
+| Environment | Base URL | Keterangan |
+| :--- | :--- | :--- |
+| **Local Dev** | `http://localhost:8001` | Server lokal backend |
+| **Production** | `https://huggingface.co/spaces/ALAMDIENG/waste-prediction-api` | Deployment HuggingFace Spaces |
+
+---
+
+## 📡 Endpoint Reference
+
+### 1. Health Check
+Memverifikasi status server dan kesiapan model AI. Endpoint ini **publik** (tidak memerlukan API Key).
+
+-   **URL:** `/status`
+-   **Method:** `GET`
+-   **Response Success (200):**
+    ```json
+    {
+      "status": "Online",
+      "model_chronos": "Chronos-T5 Tiny",
+      "model_gbr": "Gradient Boosting Regressor",
+      "calibrated": true
+    }
+    ```
+
+### 2. Waste Prediction (Core Engine)
+Endpoint utama untuk melakukan forecasting volume sampah, dekomposisi jenis sampah, dan perencanaan logistik.
+
+-   **URL:** `/api/v1/predict`
+-   **Method:** `POST`
+-   **Headers:** `Content-Type: application/json`, `x-api-key: <your_key>`
+-   **Request Body:**
+    ```json
+    {
+      "location": "JIS",
+      "forecast_days": 7,
+      "start_date": "2026-07-10",
+      "rainfall_mm": 15.5,
+      "event_scale": 2,
+      "granularity": "daily",
+      "model_type": "chronos"
+    }
+    ```
+-   **Field Validation:**
+    -   `location`: Wajib. Pilihan: `JIS`, `GBK`, `Pasar Senen`, `Gang Sempit Tambora`
+    -   `forecast_days`: Wajib. Integer 1–30
+    -   `granularity`: Opsional. `daily` (default) atau `hourly`
+    -   `model_type`: Opsional. `chronos` (default) atau `gradient_boosting`
+
+-   **Response Success (200):**
+    ```json
+    {
+      "status": "success",
+      "message": "WARNING conditions expected.",
+      "confidence_score": 0.9325,
+      "data": {
+        "prediction_results": [
+          {
+            "date": "2026-07-10",
+            "location": "JIS",
+            "total_volume_ton": 12.45,
+            "organic_waste_ton": 6.21,
+            "plastic_waste_ton": 2.86,
+            "recommended_trucks": 3,
+            "risk_status": "WARNING",
+            "event_info": "Event Skala 2",
+            "hourly_breakdown": null
+          }
+        ],
+        "logistics_plan": {
+          "trucks_needed": 3,
+          "manpower": 9,
+          "estimated_duration_hours": 24.5,
+          "efficiency_rate": "85% (Optimal)"
+        }
+      }
+    }
+    ```
+
+### 3. Export CSV
+Mengunduh hasil prediksi dalam format file `.csv`.
+
+-   **URL:** `/api/v1/predict/csv`
+-   **Method:** `POST`
+-   **Headers:** `Content-Type: application/json`, `x-api-key: <your_key>`
+-   **Request Body:** Sama dengan endpoint `/predict`
+-   **Response:** Binary stream (`text/csv`) dengan header `Content-Disposition: attachment`
+-   **⚠️ Penting untuk FE:** Wajib set `responseType: 'blob'` di Axios/Fetch.
+
+### 4. Alerts Dashboard
+Mengambil daftar lokasi dengan status WARNING/CRITICAL dalam 3 hari ke depan.
+
+-   **URL:** `/api/v1/alerts`
+-   **Method:** `GET`
+-   **Headers:** `x-api-key: <your_key>`
+-   **Query Params:** `location` (Opsional, filter per lokasi)
+-   **Response Success (200):**
+    ```json
+    {
+      "status": "success",
+      "alert_count": 1,
+      "alerts": [
+        {
+          "date": "2026-07-11",
+          "location": "GBK",
+          "status": "CRITICAL",
+          "estimated_volume_ton": 18.50,
+          "message": "Alert: CRITICAL volume expected at GBK"
+        }
+      ],
+      "last_updated": "2026-07-10T08:30:00.000Z"
+    }
+    ```
+
+---
+
+## 🗺️ Konstanta Spasial & Logistik
+Gunakan konstanta ini di Frontend untuk rendering peta (Leaflet.js) dan info rute.
+
+```typescript
+// Koordinat Lokasi Pengamatan
+export const LOCATION_COORDINATES = {
+  "GBK": { latitude: -6.2183, longitude: 106.8022 },
+  "JIS": { latitude: -6.1244, longitude: 106.8622 },
+  "Pasar Senen": { latitude: -6.1744, longitude: 106.8444 },
+  "Gang Sempit Tambora": { latitude: -6.1500, longitude: 106.8000 }
+};
+
+// Koordinat TPST Bantargebang (Tujuan Akhir)
+export const BANTARGEBANG_COORDS = { latitude: -6.3477, longitude: 106.9939 };
+
+// Profil Rute Logistik
+export const LOGISTICS_ROUTING_PROFILES = {
+  "JIS": { distance: "41.2 km", travelTime: "1.5 Jam" },
+  "GBK": { distance: "38.5 km", travelTime: "1.8 Jam" },
+  "Pasar Senen": { distance: "34.8 km", travelTime: "1.4 Jam" },
+  "Gang Sempit Tambora": { distance: "43.5 km", travelTime: "2.1 Jam" }
+};
+```
+
+---
+
+## 🎨 Panduan Mapping UI
+
+### Risk Status Badge Color
+Backend mengembalikan string murni tanpa emoji. Gunakan mapping warna berikut:
+
+| Status | Warna | Hex Code |
+| :--- | :--- | :--- |
+| `SAFE` | Hijau Terang | `#00E676` |
+| `WARNING` | Kuning Neon | `#FFD600` |
+| `CRITICAL` | Merah Menyala | `#FF1744` |
+
+### Kalkulasi Komposisi Sampah
+Untuk Progress Bar Organik vs Plastik:
+```javascript
+const organicPct = totalVol > 0 ? (totalOrganic / totalVol) * 100 : 0;
+const plasticPct = totalVol > 0 ? (totalPlastic / totalVol) * 100 : 0;
+```
+
+### Confidence Score
+Nilai `confidence_score` berada dalam skala **0.0 – 1.0**. Untuk tampilan persentase, kalikan dengan 100 dan gunakan `.toFixed(1)`.
+
+---
+
+## ⚠️ Error Handling
+
+| HTTP Code | Meaning | FE Action |
+| :--- | :--- | :--- |
+| `400` | Bad Request / Validasi Gagal | Tampilkan pesan error dari field `message` |
+| `401` | Unauthorized | Cek konfigurasi API Key di env frontend |
+| `404` | Area Tidak Terdaftar | Tampilkan notifikasi "Lokasi belum tersedia" |
+| `422` | Unprocessable Entity | Input di luar rentang valid (misal forecast_days > 30) |
+| `503` | Service Unavailable | Model AI sedang loading. Tampilkan spinner/loading state |
+| `500` | Internal Server Error | Tampilkan toast error generik |
+
+---
+
+## 👨‍💻 Developer Contact
+**System Architect:** BagasHtml  
+**AI & Backend Lead:** Faril Putra Pratama (@FARILtau72)  
+
+*Last Updated: July 2026 | Waste Intelligence Hackathon Project*

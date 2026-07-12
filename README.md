@@ -18,7 +18,7 @@ Seluruh endpoint bisnis (kecuali Health Check) dilindungi menggunakan **API Key 
 | Environment | Base URL | Keterangan |
 | :--- | :--- | :--- |
 | **Local Dev** | `http://localhost:8001` | Server lokal backend |
-| **Production** | `https://huggingface.co/spaces/ALAMDIENG/waste-prediction-api` | Deployment HuggingFace Spaces |
+| **Production** | `https://waste-api-git-main-bagashtmls-projects.vercel.app/` | Deployment Vercel |
 
 ---
 

@@ -1,3 +1,4 @@
+// src/controllers/predict.controller.js
 import prisma from '../config/db.js';
 import { wasteService } from '../services/predict.service.js';
 
@@ -105,7 +106,7 @@ export const corePredict = async (req, res) => {
   }
 
   try {
-    // Validasi lokasi LANGSUNG DARI DATABASE (Hasil Seed)
+    // ✅ 1. Validasi lokasi LANGSUNG DARI DATABASE (Hasil Seed)
     const rawLocation = body.location.trim();
     const areaData = await prisma.masterArea.findUnique({
       where: { name: rawLocation },
@@ -118,6 +119,7 @@ export const corePredict = async (req, res) => {
       });
     }
 
+    // ✅ 2. Panggil AI Service
     const defaultStartDate = getJakartaNow().toISOString().split('T')[0];
     const aiData = await wasteService.predict({
       location: areaData.name,
@@ -129,6 +131,7 @@ export const corePredict = async (req, res) => {
       model_type: body.model_type || "chronos"
     });
 
+    // ✅ 3. Enrichment & Kalkulasi Bisnis
     const enrichedResults = enrichPredictionResults(aiData.data?.prediction_results || [], rawLocation, areaData);
     const totalVolume = Number(enrichedResults.reduce((a, i) => a + i.total_volume_ton, 0).toFixed(2));
     const calculatedRisk = getOverallRiskStatus(enrichedResults);
@@ -137,21 +140,57 @@ export const corePredict = async (req, res) => {
 
     const safeLogDate = body.start_date ? new Date(body.start_date) : getJakartaNow();
     const eventScale = Number(body.event_scale ?? 0);
+    const rainfallMm = Number(body.rainfall_mm ?? 0);
 
-    const txOps = [
-      prisma.predictionLog.create({
-        data: { areaId: areaData.id, prediction_date: safeLogDate, volume_ton: totalVolume, confidence_score: confidenceScore * 100, risk_status: calculatedRisk }
-      })
-    ];
+    // ✅ 4. MULTI-TABLE TRANSACTION (PredictionLog + CrowdPermit + OperationalParam + TpaFacility)
+    const txOps = [];
 
+    // A. Simpan Riwayat Prediksi (Menggunakan areaData.id yang DINAMIS)
+    txOps.push(prisma.predictionLog.create({
+      data: { 
+        areaId: areaData.id, // ✅ FIX: Tidak lagi hardcoded ke 1
+        prediction_date: safeLogDate, 
+        volume_ton: totalVolume, 
+        confidence_score: confidenceScore * 100, 
+        risk_status: calculatedRisk 
+      }
+    }));
+
+    // B. Simpan Crowd Permit jika ada Event
     if (eventScale > 0) {
       const eventName = enrichedResults.find(i => i.event_info)?.event_info || `Event Skala ${eventScale}`;
       txOps.push(prisma.crowdPermit.create({
-        data: { areaId: areaData.id, event_name: eventName, event_date: safeLogDate, estimated_crowd: eventScale * 15000, status: "APPROVED" }
+        data: { 
+          areaId: areaData.id, // ✅ FIX: Menggunakan areaData.id
+          event_name: eventName, 
+          event_date: safeLogDate, 
+          estimated_crowd: eventScale * 15000, 
+          status: "APPROVED" 
+        }
       }));
     }
 
-    prisma.$transaction(txOps).catch(e => console.error("DB Write Warning:", e.message));
+    // C. Update Parameter Operasional (Rainfall & Event Scale)
+    txOps.push(prisma.operationalParam.upsert({
+      where: { param_key: `rainfall_mm_${areaData.name}` },
+      update: { param_value: rainfallMm },
+      create: { param_key: `rainfall_mm_${areaData.name}`, param_value: rainfallMm }
+    }));
+    
+    txOps.push(prisma.operationalParam.upsert({
+      where: { param_key: `event_scale_${areaData.name}` },
+      update: { param_value: eventScale },
+      create: { param_key: `event_scale_${areaData.name}`, param_value: eventScale }
+    }));
+
+    // D. Update Beban TPA Bantargebang (Menambah volume prediksi ke current_load)
+    txOps.push(prisma.tpaFacility.update({
+      where: { id: 1 }, // Asumsi TPST Bantargebang selalu ID 1 dari seed
+      data: { current_load_ton: { increment: totalVolume } }
+    }));
+
+    // ✅ Jalankan Transaksi (BLOCKING agar error DB langsung terdeteksi)
+    await prisma.$transaction(txOps);
 
     return res.status(200).json({
       status: "success",

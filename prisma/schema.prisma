@@ -10,14 +10,18 @@ generator client {
   binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
+// prisma/schema.prisma
 model MasterArea {
-  id           Int           @id @default(autoincrement())
-  name         String        @unique @db.VarChar(191)
-  // Tambahkan @default(0) agar tidak null saat dibuat via Studio
-  latitude     Float         @default(0)
-  longitude    Float         @default(0)
-  predictions  PredictionLog[]
-  crowdPermits CrowdPermit[]
+  id                 Int             @id @default(autoincrement())
+  name               String          @unique @db.VarChar(191)
+  latitude           Float           @default(0)
+  longitude          Float           @default(0)
+  city               String          @db.VarChar(100)
+  normal_avg         Float           @default(0)
+  warning_threshold  Float           @default(0)
+  critical_threshold Float           @default(0)
+  predictions        PredictionLog[]
+  crowdPermits       CrowdPermit[]
 }
 
 model PredictionLog {

@@ -5,10 +5,25 @@ import { wasteService } from '../services/predict.service.js';
 // 🕐 WIB Timezone Helper
 const getJakartaNow = () => new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Jakarta" }));
 
+// ✅ Alias Mapping: Venue → Kecamatan Administratif
+const LOCATION_ALIASES = {
+  "JIS": "Pademangan",
+  "GBK": "Tanah Abang",
+  "PASAR SENEN": "Senen",
+  "GANG SEMPIT TAMBORA": "Tambora",
+  "MONAS": "Gambir",
+  "ANCOL": "Pademangan"
+};
+
 const TRUCK_CAPACITY_TON = 5;
 const WASTE_COMPOSITION = {
   organic: 0.4987, plastic: 0.2295, paper: 0.1148,
   glass: 0.0320, metal: 0.0210, textile: 0.0418, other: 0.0622
+};
+
+const resolveLocation = (rawInput) => {
+  const upper = rawInput.trim().toUpperCase();
+  return LOCATION_ALIASES[upper] || rawInput.trim();
 };
 
 const getRiskStatus = (vol, areaMeta) => {
@@ -106,10 +121,12 @@ export const corePredict = async (req, res) => {
   }
 
   try {
-    // ✅ 1. Validasi lokasi LANGSUNG DARI DATABASE (Hasil Seed)
+    // ✅ Resolve alias SEBELUM query DB
     const rawLocation = body.location.trim();
+    const resolvedLocation = resolveLocation(rawLocation);
+
     const areaData = await prisma.masterArea.findUnique({
-      where: { name: rawLocation },
+      where: { name: resolvedLocation },
       select: { id: true, name: true, warning_threshold: true, critical_threshold: true }
     });
 
@@ -119,7 +136,6 @@ export const corePredict = async (req, res) => {
       });
     }
 
-    // ✅ 2. Panggil AI Service
     const defaultStartDate = getJakartaNow().toISOString().split('T')[0];
     const aiData = await wasteService.predict({
       location: areaData.name,
@@ -131,7 +147,6 @@ export const corePredict = async (req, res) => {
       model_type: body.model_type || "chronos"
     });
 
-    // ✅ 3. Enrichment & Kalkulasi Bisnis
     const enrichedResults = enrichPredictionResults(aiData.data?.prediction_results || [], rawLocation, areaData);
     const totalVolume = Number(enrichedResults.reduce((a, i) => a + i.total_volume_ton, 0).toFixed(2));
     const calculatedRisk = getOverallRiskStatus(enrichedResults);
@@ -142,54 +157,60 @@ export const corePredict = async (req, res) => {
     const eventScale = Number(body.event_scale ?? 0);
     const rainfallMm = Number(body.rainfall_mm ?? 0);
 
-    // ✅ 4. MULTI-TABLE TRANSACTION (PredictionLog + CrowdPermit + OperationalParam + TpaFacility)
+    // ✅ MULTI-TABLE TRANSACTION (Fixed: TpaFacility pakai upsert)
     const txOps = [];
 
-    // A. Simpan Riwayat Prediksi (Menggunakan areaData.id yang DINAMIS)
+    // A. PredictionLog
     txOps.push(prisma.predictionLog.create({
-      data: { 
-        areaId: areaData.id, // ✅ FIX: Tidak lagi hardcoded ke 1
-        prediction_date: safeLogDate, 
-        volume_ton: totalVolume, 
-        confidence_score: confidenceScore * 100, 
-        risk_status: calculatedRisk 
+      data: {
+        areaId: areaData.id,
+        prediction_date: safeLogDate,
+        volume_ton: totalVolume,
+        confidence_score: confidenceScore * 100,
+        risk_status: calculatedRisk
       }
     }));
 
-    // B. Simpan Crowd Permit jika ada Event
+    // B. CrowdPermit (jika ada event)
     if (eventScale > 0) {
       const eventName = enrichedResults.find(i => i.event_info)?.event_info || `Event Skala ${eventScale}`;
       txOps.push(prisma.crowdPermit.create({
-        data: { 
-          areaId: areaData.id, // ✅ FIX: Menggunakan areaData.id
-          event_name: eventName, 
-          event_date: safeLogDate, 
-          estimated_crowd: eventScale * 15000, 
-          status: "APPROVED" 
+        data: {
+          areaId: areaData.id,
+          event_name: eventName,
+          event_date: safeLogDate,
+          estimated_crowd: eventScale * 15000,
+          status: "APPROVED"
         }
       }));
     }
 
-    // C. Update Parameter Operasional (Rainfall & Event Scale)
+    // C. OperationalParam (per lokasi)
     txOps.push(prisma.operationalParam.upsert({
       where: { param_key: `rainfall_mm_${areaData.name}` },
       update: { param_value: rainfallMm },
       create: { param_key: `rainfall_mm_${areaData.name}`, param_value: rainfallMm }
     }));
-    
+
     txOps.push(prisma.operationalParam.upsert({
       where: { param_key: `event_scale_${areaData.name}` },
       update: { param_value: eventScale },
       create: { param_key: `event_scale_${areaData.name}`, param_value: eventScale }
     }));
 
-    // D. Update Beban TPA Bantargebang (Menambah volume prediksi ke current_load)
-    txOps.push(prisma.tpaFacility.update({
-      where: { id: 1 }, // Asumsi TPST Bantargebang selalu ID 1 dari seed
-      data: { current_load_ton: { increment: totalVolume } }
+    // D. ✅ FIX: TpaFacility pakai UPSERT agar tidak error jika record belum ada
+    txOps.push(prisma.tpaFacility.upsert({
+      where: { id: 1 },
+      update: { current_load_ton: { increment: totalVolume } },
+      create: {
+        id: 1,
+        name: "TPST Bantargebang",
+        max_capacity_ton: 7500.0,
+        current_load_ton: totalVolume
+      }
     }));
 
-    // ✅ Jalankan Transaksi (BLOCKING agar error DB langsung terdeteksi)
+    // ✅ Blocking transaction
     await prisma.$transaction(txOps);
 
     return res.status(200).json({
@@ -211,7 +232,8 @@ export const exportCSV = async (req, res) => {
 
   try {
     const rawLocation = body.location.trim();
-    const areaData = await prisma.masterArea.findUnique({ where: { name: rawLocation }, select: { id: true, name: true, warning_threshold: true, critical_threshold: true } });
+    const resolvedLocation = resolveLocation(rawLocation);
+    const areaData = await prisma.masterArea.findUnique({ where: { name: resolvedLocation }, select: { id: true, name: true, warning_threshold: true, critical_threshold: true } });
     if (!areaData) return res.status(422).json({ detail: [{ type: "value_error", loc: ["body", "location"], msg: "Location not found.", input: body.location }] });
 
     const defaultStartDate = getJakartaNow().toISOString().split('T')[0];

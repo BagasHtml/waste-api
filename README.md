@@ -19,7 +19,7 @@ Seluruh endpoint bisnis dilindungi menggunakan **API Key Authentication**.
 | Environment | Base URL | Keterangan |
 | :--- | :--- | :--- |
 | **Local Dev** | `http://localhost:8001` | Server lokal backend (Node.js) |
-| **Production** | `https://<your-vercel-app>.vercel.app` | Deployment Vercel Serverless |
+| **Production** | `https://waste-api-seven.vercel.app/` | Deployment Vercel Serverless |
 | **AI Engine** | *(Internal)* | Diakses via backend gateway, tidak langsung dari FE |
 
 ---

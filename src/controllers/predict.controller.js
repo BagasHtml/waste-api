@@ -228,29 +228,66 @@ export const corePredict = async (req, res) => {
 
 export const exportCSV = async (req, res) => {
   const body = req.body;
-  if (!body?.location || !body?.forecast_days) return res.status(400).json({ status: "error", message: "Location & forecast_days wajib." });
+  if (!body?.location || !body?.forecast_days) {
+    return res.status(400).json({ status: "error", message: "Location & forecast_days wajib." });
+  }
 
   try {
+    // ✅ Resolve alias SEBELUM query DB (sama seperti corePredict)
     const rawLocation = body.location.trim();
     const resolvedLocation = resolveLocation(rawLocation);
-    const areaData = await prisma.masterArea.findUnique({ where: { name: resolvedLocation }, select: { id: true, name: true, warning_threshold: true, critical_threshold: true } });
-    if (!areaData) return res.status(422).json({ detail: [{ type: "value_error", loc: ["body", "location"], msg: "Location not found.", input: body.location }] });
 
-    const defaultStartDate = getJakartaNow().toISOString().split('T')[0];
-    const aiData = await wasteService.predict({
-      location: areaData.name, start_date: body.start_date || defaultStartDate, forecast_days: body.forecast_days,
-      rainfall_mm: body.rainfall_mm ?? 0, event_scale: body.event_scale ?? 0, granularity: body.granularity || "daily", model_type: body.model_type || "chronos"
+    // ✅ Validasi lokasi LANGSUNG DARI DATABASE
+    const areaData = await prisma.masterArea.findUnique({
+      where: { name: resolvedLocation },
+      select: { id: true, name: true, warning_threshold: true, critical_threshold: true }
     });
 
-    const enriched = enrichPredictionResults(aiData.data?.prediction_results || [], rawLocation, areaData);
+    if (!areaData) {
+      return res.status(422).json({
+        detail: [{
+          type: "value_error",
+          loc: ["body", "location"],
+          msg: "Kecamatan not recognized.",
+          input: body.location
+        }]
+      });
+    }
+
+    // ✅ Gunakan getJakartaNow() untuk sinkronisasi WIB
+    const defaultStartDate = getJakartaNow().toISOString().split('T')[0];
+
+    // ✅ Kirim nama kecamatan administratif ke AI Service
+    const aiData = await wasteService.predict({
+      location: areaData.name, // "Pademangan", bukan "JIS"
+      start_date: body.start_date || defaultStartDate,
+      forecast_days: body.forecast_days,
+      rainfall_mm: body.rainfall_mm ?? 0,
+      event_scale: body.event_scale ?? 0,
+      granularity: body.granularity || "daily",
+      model_type: body.model_type || "chronos"
+    });
+
+    const enriched = enrichPredictionResults(
+      aiData.data?.prediction_results || [],
+      rawLocation,
+      areaData
+    );
+
     const csv = generateCsvContent(enriched);
     const filename = `waste_forecast_${rawLocation.replace(/\s+/g, '_')}_${body.forecast_days}d.csv`;
 
     res.setHeader("Content-Type", "text/csv");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     return res.status(200).send(csv);
+
   } catch (e) {
-    return res.status(500).json({ status: "error", message: "Gagal export CSV." });
+    console.error("CSV Export Error:", e);
+    return res.status(500).json({
+      status: "error",
+      message: "Gagal export CSV.",
+      debug: e.message 
+    });
   }
 };
 

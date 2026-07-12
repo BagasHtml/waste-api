@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { corePredict, exportCSV } from '../controllers/predict.controller.js';
 import { getAlerts } from '../controllers/alert.controller.js';
 import { getNews } from '../controllers/news.controller.js';
-import { getAutopilot } from '../controllers/autopilot.controller.js';
+import { getAutopilot } from '../controllers/autopilot.controller.js'
 import { validateApiKey } from '../middlewares/auth.js';
 
 const router = Router();

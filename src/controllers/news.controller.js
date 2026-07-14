@@ -1,53 +1,104 @@
 // src/controllers/news.controller.js
+import { readFileSync, writeFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
-// Data berita statis dari Antara News (di-crawl berkala)
-// Di production/hackathon demo, data ini bisa diganti dengan cron job scraper
-const NEWS_DATABASE = [
-  {
-    title: "DKI Uji Coba Penarikan Retribusi Sampah Pelayanan Kebersihan Harian",
-    source: "Antara News",
-    url: "https://www.antaranews.com/tag/sampah-jakarta",
-    date_fetched: "2026-07-10",
-    summary: "Pemprov DKI Jakarta merencanakan uji coba penarikan retribusi pelayanan kebersihan/sampah berdasarkan golongan daya listrik..."
-  },
-  {
-    title: "Jakarta Timur Tuntas Bersihkan 45 Ton Sampah di TPS Liar",
-    source: "Antara News",
-    url: "https://www.antaranews.com/tag/sampah-jakarta",
-    date_fetched: "2026-07-10",
-    summary: "Pemerintah Kota Jakarta Timur tuntas membersihkan tumpukan 45 ton sampah di area tempat penampungan sementara liar..."
-  },
-  {
-    title: "DPRD DKI Minta DLH Tata Ulang Sistem Pengelolaan Sampah",
-    source: "Antara News",
-    url: "https://www.antaranews.com/tag/sampah-jakarta",
-    date_fetched: "2026-07-09",
-    summary: "Ketua Komisi D DPRD DKI Jakarta meminta Dinas Lingkungan Hidup agar menata sistem pengelolaan sampah lebih efisien..."
-  },
-  {
-    title: "Jakarta Barat Fokus Tangani Sampah Organik di Permukiman",
-    source: "Antara News",
-    url: "https://www.antaranews.com/tag/sampah-jakarta",
-    date_fetched: "2026-07-09",
-    summary: "Pemkot Jakarta Barat memfokuskan penanganan sampah organik di kawasan permukiman sebagai prioritas utama..."
-  },
-  {
-    title: "Bank Sampah Pintar Kemilau Perkuat Budaya Pilah Sampah di Jaktim",
-    source: "Antara News",
-    url: "https://www.antaranews.com/tag/sampah-jakarta",
-    date_fetched: "2026-07-08",
-    summary: "Pemkot Jakarta Timur memperkuat budaya pilah sampah melalui Bank Sampah Pintar Kemilau di kelurahan-kelurahan..."
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Path ke file JSON backup/cache
+const NEWS_FILE_PATH = join(__dirname, '../../latest_waste_news.json');
+const AI_SERVICE_URL = process.env.APP_URL || 'http://localhost:8000';
+const AI_NEWS_TIMEOUT = 8000; // 8 detik sesuai docs
+
+/**
+ * Membaca berita dari cache lokal (fallback)
+ */
+const readLocalNews = () => {
+  try {
+    const raw = readFileSync(NEWS_FILE_PATH, 'utf-8');
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error('⚠️ Failed to read local news cache:', err.message);
+    return [];
   }
-];
+};
+
+/**
+ * Menulis berita baru ke cache lokal
+ */
+const writeLocalNews = (data) => {
+  try {
+    writeFileSync(NEWS_FILE_PATH, JSON.stringify(data, null, 2), 'utf-8');
+    console.log(`📰 News cache updated with ${data.length} articles`);
+  } catch (err) {
+    console.error('⚠️ Failed to write news cache:', err.message);
+  }
+};
+
+/**
+ * Memanggil AI Service untuk mendapatkan berita terbaru
+ * Timeout: 8 detik sesuai Backend Architecture Docs v4.0.0
+ */
+const fetchAINews = async () => {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), AI_NEWS_TIMEOUT);
+
+    const response = await fetch(`${AI_SERVICE_URL}/api/v1/news`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new Error(`AI News API returned ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    // Validasi struktur response
+    if (!Array.isArray(data) || data.length === 0) {
+      throw new Error('AI News API returned empty or invalid data');
+    }
+
+    return data;
+  } catch (err) {
+    console.warn(`⚠️ AI News fetch failed (${err.message}), falling back to local cache`);
+    return null;
+  }
+};
 
 export const getNews = async (req, res) => {
   try {
-    return res.status(200).json(NEWS_DATABASE);
+    // 1. Coba ambil dari AI Service terlebih dahulu
+    const aiNews = await fetchAINews();
+
+    if (aiNews) {
+      // ✅ AI sukses → Update cache lokal & kembalikan data baru
+      writeLocalNews(aiNews);
+      return res.status(200).json(aiNews);
+    }
+
+    // 2. AI gagal/timeout → Fallback ke cache lokal
+    const localNews = readLocalNews();
+
+    if (localNews.length === 0) {
+      return res.status(503).json({
+        status: 'error',
+        message: 'News service unavailable and no cached data found.'
+      });
+    }
+
+    return res.status(200).json(localNews);
+
   } catch (error) {
-    console.error("Get News Error:", error.message);
-    return res.status(500).json({ 
-      status: "error", 
-      message: "Gagal mengambil data berita." 
+    console.error('Get News Error:', error.message);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Gagal mengambil data berita.'
     });
   }
 };

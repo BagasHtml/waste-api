@@ -1,60 +1,61 @@
-// prisma/schema.prisma
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
 
 datasource db {
   provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
-generator client {
-  provider = "prisma-client-js"
-  binaryTargets = ["native", "rhel-openssl-3.0.x"]
-}
-
-// prisma/schema.prisma
 model MasterArea {
   id                 Int             @id @default(autoincrement())
-  name               String          @unique @db.VarChar(191)
+  name               String          @unique
   latitude           Float           @default(0)
   longitude          Float           @default(0)
   city               String          @db.VarChar(100)
   normal_avg         Float           @default(0)
   warning_threshold  Float           @default(0)
   critical_threshold Float           @default(0)
-  predictions        PredictionLog[]
   crowdPermits       CrowdPermit[]
+  predictions        PredictionLog[]
 }
 
 model PredictionLog {
   id               Int        @id @default(autoincrement())
   areaId           Int
-  area             MasterArea @relation(fields: [areaId], references: [id])
   prediction_date  DateTime
   volume_ton       Float
   confidence_score Float
   risk_status      String     @db.VarChar(50)
   createdAt        DateTime   @default(now())
+  area             MasterArea @relation(fields: [areaId], references: [id])
+
+  @@index([areaId], map: "PredictionLog_areaId_fkey")
 }
 
 model CrowdPermit {
   id              Int        @id @default(autoincrement())
   areaId          Int
-  area            MasterArea @relation(fields: [areaId], references: [id])
-  event_name      String     @db.VarChar(191)
+  event_name      String
   event_date      DateTime
   estimated_crowd Int
   status          String     @db.VarChar(50)
   createdAt       DateTime   @default(now())
+  area            MasterArea @relation(fields: [areaId], references: [id])
+
+  @@index([areaId], map: "CrowdPermit_areaId_fkey")
 }
 
 model OperationalParam {
   id          Int    @id @default(autoincrement())
-  param_key   String @unique @db.VarChar(191)
+  param_key   String @unique
   param_value Float
 }
 
 model FleetInventory {
   id                     Int    @id @default(autoincrement())
-  truck_type             String @db.VarChar(191)
+  truck_type             String
   total_units            Int
   ready_units            Int
   capacity_per_truck_ton Float
@@ -62,7 +63,7 @@ model FleetInventory {
 
 model TpaFacility {
   id               Int    @id @default(autoincrement())
-  name             String @db.VarChar(191)
+  name             String
   max_capacity_ton Float
   current_load_ton Float
 }

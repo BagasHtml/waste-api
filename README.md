@@ -1,4 +1,4 @@
-# 📚 Aeterna AI - Frontend Integration Guide (v4.0.0)
+# 📚 Aeterna AI - Frontend Integration Guide (v4.2.0)
 **Sistem Prediksi Manajemen Sampah DKI Jakarta 2026**
 
 Dokumen ini berisi panduan integrasi antara Backend API (Node.js Gateway) dan Frontend Dashboard. Seluruh endpoint telah distandarisasi mengikuti prinsip *Clean Architecture*, *Database-First Validation*, dan *Type-Safe Contract*.
@@ -7,7 +7,7 @@ Dokumen ini berisi panduan integrasi antara Backend API (Node.js Gateway) dan Fr
 Seluruh endpoint bisnis dilindungi menggunakan **API Key Authentication**.
 -   **Header Name:** `x-api-key`
 -   **Cakupan:** Wajib untuk semua endpoint di bawah `/api/v1/*`
--   **Pengecualian:** Endpoint `/status` bersifat **PUBLIK** (tidak memerlukan API Key) untuk keperluan health check monitoring.
+-   **Pengecualian:** Endpoint `/status` bersifat **PUBLIK** (tidak memerlukan API Key).
 -   **Response Gagal:** `401 Unauthorized` jika key tidak valid/hilang.
 
 > ⚠️ **Security Notice:** Jangan pernah menuliskan API Key secara *hardcoded* di source code frontend. Selalu gunakan environment variable (misal: `VITE_API_KEY`).
@@ -19,37 +19,43 @@ Seluruh endpoint bisnis dilindungi menggunakan **API Key Authentication**.
 | Environment | Base URL | Keterangan |
 | :--- | :--- | :--- |
 | **Local Dev** | `http://localhost:8001` | Server lokal backend (Node.js) |
-| **Production** | `https://waste-api-seven.vercel.app/` | Deployment Vercel Serverless |
+| **Production** | `https://waste-api-seven.vercel.app` | Deployment Vercel Serverless |
 | **AI Engine** | *(Internal)* | Diakses via backend gateway, tidak langsung dari FE |
 
 ---
 
 ## 🗺️ Konstanta Wilayah & Logistik
-Backend kini mendukung **44 Kecamatan DKI Jakarta** + 4 Venue Legacy. Gunakan konstanta berikut untuk rendering peta (Leaflet.js) dan info rute.
+Backend **hanya** mendukung **44 Kecamatan Administratif DKI Jakarta**. Venue/landmark (JIS, GBK, dll.) **tidak lagi didukung**.
+
+Gunakan konstanta berikut untuk rendering peta (Leaflet.js) dan info rute:
 
 ```typescript
-// Koordinat Lokasi Pengamatan (Venue + Perwakilan Kecamatan)
-export const LOCATION_COORDINATES = {
-  "GBK": { latitude: -6.2183, longitude: 106.8022 },
-  "JIS": { latitude: -6.1244, longitude: 106.8622 },
-  "Pasar Senen": { latitude: -6.1744, longitude: 106.8444 },
-  "Gang Sempit Tambora": { latitude: -6.1500, longitude: 106.8000 },
-  // ... tambahkan koordinat 44 kecamatan sesuai kebutuhan UI
-};
-
 // Koordinat TPST Bantargebang (Tujuan Akhir)
 export const BANTARGEBANG_COORDS = { latitude: -6.3477, longitude: 106.9939 };
 
-// Profil Rute Logistik
-export const LOGISTICS_ROUTING_PROFILES = {
-  "JIS": { distance: "41.2 km", travelTime: "1.5 Jam" },
-  "GBK": { distance: "38.5 km", travelTime: "1.8 Jam" },
-  "Pasar Senen": { distance: "34.8 km", travelTime: "1.4 Jam" },
-  "Gang Sempit Tambora": { distance: "43.5 km", travelTime: "2.1 Jam" }
+// Contoh Koordinat Kecamatan (lengkapi sesuai kebutuhan UI)
+export const KECAMATAN_COORDINATES: Record<string, { latitude: number; longitude: number }> = {
+  "Menteng": { latitude: -6.1950, longitude: 106.8322 },
+  "Senen": { latitude: -6.1822, longitude: 106.8452 },
+  "Cempaka Putih": { latitude: -6.1802, longitude: 106.8686 },
+  "Tanah Abang": { latitude: -6.2104, longitude: 106.8122 },
+  "Pademangan": { latitude: -6.1328, longitude: 106.8422 },
+  "Cakung": { latitude: -6.1828, longitude: 106.9482 },
+  // ... 38 kecamatan lainnya tersedia via endpoint /api/v1/autopilot
+};
+
+// Profil Rute Logistik (contoh)
+export const LOGISTICS_ROUTING_PROFILES: Record<string, { distance: string; travelTime: string }> = {
+  "Menteng": { distance: "35.2 km", travelTime: "1.3 Jam" },
+  "Senen": { distance: "34.8 km", travelTime: "1.4 Jam" },
+  "Tanah Abang": { distance: "38.5 km", travelTime: "1.8 Jam" },
+  "Pademangan": { distance: "41.2 km", travelTime: "1.5 Jam" },
+  "Cakung": { distance: "45.0 km", travelTime: "2.0 Jam" },
+  // ... lengkapi sesuai data rute aktual
 };
 ```
 
-> 💡 **Alias Mapping:** Backend secara otomatis menerjemahkan input `"JIS"` → `"Pademangan"`, `"GBK"` → `"Tanah Abang"`, dll. Frontend **tetap boleh** mengirim nama venue lama (`JIS`, `GBK`) tanpa error. Response akan mengembalikan nama asli yang dikirim FE agar UI tidak rusak.
+> 💡 **Tip:** Endpoint `/api/v1/autopilot` kini mengembalikan `latitude` dan `longitude` untuk setiap kecamatan. FE bisa langsung menggunakan data tersebut untuk render marker di peta tanpa bergantung pada konstanta hardcoded.
 
 ---
 
@@ -60,6 +66,7 @@ Memverifikasi status server dan kesiapan model AI.
 -   **URL:** `/status`
 -   **Method:** `GET`
 -   **Auth:** ❌ Tidak Perlu
+-   **Rate Limit:** 60 req/min
 -   **Response Success (200):**
     ```json
     {
@@ -75,10 +82,11 @@ Endpoint utama untuk forecasting volume sampah, dekomposisi 8 jenis sampah, dan 
 -   **URL:** `/api/v1/predict`
 -   **Method:** `POST`
 -   **Auth:** 🔒 `x-api-key`
+-   **Rate Limit:** 10 req/min
 -   **Request Body:**
     ```json
     {
-      "location": "JIS",
+      "location": "Pademangan",
       "forecast_days": 7,
       "start_date": "2026-07-10",
       "rainfall_mm": 15.5,
@@ -88,7 +96,7 @@ Endpoint utama untuk forecasting volume sampah, dekomposisi 8 jenis sampah, dan 
     }
     ```
 -   **Field Validation:**
-    -   `location`: String. Mendukung 44 kecamatan + alias (`JIS`, `GBK`, `Pasar Senen`, `Gang Sempit Tambora`)
+    -   `location`: String. **Hanya menerima nama 44 kecamatan administratif DKI Jakarta** (case-sensitive, harus persis dengan nama di database)
     -   `forecast_days`: Integer 1–30
     -   `granularity`: `'daily'` (default) | `'hourly'`
     -   `model_type`: `'chronos'` (default) | `'gradient_boosting'`
@@ -103,7 +111,7 @@ Endpoint utama untuk forecasting volume sampah, dekomposisi 8 jenis sampah, dan 
         "prediction_results": [
           {
             "date": "2026-07-10",
-            "location": "JIS",
+            "location": "Pademangan",
             "total_volume_ton": 12.45,
             "organic_waste_ton": 6.21,
             "plastic_waste_ton": 2.86,
@@ -133,15 +141,17 @@ Mengunduh hasil prediksi dalam format file `.csv`.
 -   **URL:** `/api/v1/predict/csv`
 -   **Method:** `POST`
 -   **Auth:** 🔒 `x-api-key`
+-   **Rate Limit:** 10 req/min
 -   **Request Body:** Sama dengan `/predict`
 -   **Response:** Binary stream (`text/csv`)
 -   **⚠️ Penting untuk FE:** Wajib set `responseType: 'blob'` di Axios/Fetch.
 
-### 4. Berita Sampah Harian
-Mengambil database berita seputar persampahan DKI Jakarta yang diperbarui berkala.
+### 4. Berita Sampah Harian (Dynamic + Fallback)
+Mengambil berita persampahan DKI Jakarta. Sistem menggunakan mekanisme **AI-First with Local Fallback** untuk menjamin zero downtime.
 -   **URL:** `/api/v1/news`
 -   **Method:** `GET`
 -   **Auth:** 🔒 `x-api-key`
+-   **Rate Limit:** 30 req/min
 -   **Response Success (200):**
     ```json
     [
@@ -154,12 +164,14 @@ Mengambil database berita seputar persampahan DKI Jakarta yang diperbarui berkal
       }
     ]
     ```
+> 💡 **Catatan FE:** Jika AI Service gagal/timeout (>8 detik), backend otomatis mengembalikan data cache lokal tanpa error. FE tidak perlu menangani fallback secara manual.
 
-### 5. Autopilot Dashboard
-Mengambil prediksi otonom agregat untuk seluruh kecamatan DKI Jakarta hari ini.
+### 5. Autopilot Dashboard (With Coordinates)
+Mengambil prediksi otonom agregat untuk seluruh 44 kecamatan DKI Jakarta hari ini. **Menyertakan koordinat** untuk rendering peta langsung.
 -   **URL:** `/api/v1/autopilot`
 -   **Method:** `GET`
 -   **Auth:** 🔒 `x-api-key`
+-   **Rate Limit:** 30 req/min
 -   **Response Success (200):**
     ```json
     {
@@ -170,6 +182,8 @@ Mengambil prediksi otonom agregat untuk seluruh kecamatan DKI Jakarta hari ini.
       "top_kecamatan": [
         {
           "location": "Cakung",
+          "latitude": -6.1828,
+          "longitude": 106.9482,
           "volume_ton": 355.20,
           "trucks": 72,
           "status": "SAFE",
@@ -186,7 +200,8 @@ Mengambil daftar lokasi dengan status WARNING/CRITICAL dalam 3 hari ke depan.
 -   **URL:** `/api/v1/alerts`
 -   **Method:** `GET`
 -   **Auth:** 🔒 `x-api-key`
--   **Query Params:** `location` (opsional, filter per lokasi)
+-   **Rate Limit:** 30 req/min
+-   **Query Params:** `location` (opsional, filter per kecamatan)
 -   **Response Success (200):**
     ```json
     {
@@ -195,10 +210,10 @@ Mengambil daftar lokasi dengan status WARNING/CRITICAL dalam 3 hari ke depan.
       "alerts": [
         {
           "date": "2026-07-11",
-          "location": "GBK",
+          "location": "Tanah Abang",
           "status": "CRITICAL",
           "estimated_volume_ton": 18.50,
-          "message": "Alert: CRITICAL volume expected at GBK"
+          "message": "Alert: CRITICAL volume expected at Tanah Abang"
         }
       ],
       "last_updated": "2026-07-10T08:30:00.000Z"
@@ -233,9 +248,20 @@ categories.forEach(cat => {
 ### Confidence Score
 Nilai `confidence_score` berada dalam skala **0.0 – 1.0**. Untuk tampilan persentase: `(score * 100).toFixed(1) + '%'`
 
+### Rendering Peta Autopilot
+Karena response `/autopilot` menyertakan `latitude` dan `longitude`, FE bisa langsung render marker tanpa join manual:
+```javascript
+// Contoh Leaflet.js
+data.top_kecamatan.forEach(item => {
+  L.marker([item.latitude, item.longitude])
+    .bindPopup(`${item.location}: ${item.volume_ton} ton (${item.status})`)
+    .addTo(map);
+});
+```
+
 ---
 
-## ⚠️ Error Handling
+## ⚠️ Error Handling & Rate Limiting
 
 | HTTP Code | Meaning | FE Action |
 | :--- | :--- | :--- |
@@ -246,10 +272,17 @@ Nilai `confidence_score` berada dalam skala **0.0 – 1.0**. Untuk tampilan pers
 | `503` | Service Unavailable | Model AI sedang loading. Tampilkan spinner |
 | `500` | Internal Server Error | Tampilkan toast error generik |
 
+### 🚦 Rate Limit Tiers
+| Endpoint Group | Limit | Alasan |
+| :--- | :--- | :--- |
+| `/predict`, `/predict/csv` | 10 req/min | AI inference berat & mahal |
+| `/alerts`, `/news`, `/autopilot` | 30 req/min | DB query ringan |
+| `/status` | 60 req/min | Health check monitoring |
+
+> 💡 **Tips FE:** Gunakan debouncing/throttling pada tombol prediksi dan implementasi retry logic dengan exponential backoff saat menerima `429`.
+
 ---
 
 ## 👨‍💻 Developer Contact
 **System Architect:** BagasHtml (@BagasHtml)
 **AI & Backend Lead:** Faril Putra Pratama (@FARILtau72)
-
-*Last Updated: July 2026 | Waste Intelligence Hackathon Project*

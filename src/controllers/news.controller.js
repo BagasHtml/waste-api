@@ -14,6 +14,7 @@ const AI_NEWS_TIMEOUT = 8000; // 8 detik sesuai docs
 /**
  * Membaca berita dari cache lokal (fallback)
  */
+ 
 const readLocalNews = () => {
   try {
     const raw = readFileSync(NEWS_FILE_PATH, 'utf-8');

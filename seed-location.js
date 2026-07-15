@@ -2,10 +2,6 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 const LOCATIONS = [
-  { name: "JIS", latitude: -6.1244, longitude: 106.8622, city: "Jakarta Utara", normal_avg: 140, warning_threshold: 180, critical_threshold: 200 },
-  { name: "GBK", latitude: -6.2183, longitude: 106.8022, city: "Jakarta Pusat", normal_avg: 250, warning_threshold: 320, critical_threshold: 350 },
-  { name: "Pasar Senen", latitude: -6.1744, longitude: 106.8444, city: "Jakarta Pusat", normal_avg: 180, warning_threshold: 220, critical_threshold: 240 },
-  { name: "Gang Sempit Tambora", latitude: -6.1500, longitude: 106.8000, city: "Jakarta Barat", normal_avg: 80, warning_threshold: 110, critical_threshold: 125 },
   { name: "Menteng", latitude: -6.1950, longitude: 106.8322, city: "Jakarta Pusat", normal_avg: 120, warning_threshold: 160, critical_threshold: 180 },
   { name: "Senen", latitude: -6.1822, longitude: 106.8452, city: "Jakarta Pusat", normal_avg: 180, warning_threshold: 220, critical_threshold: 240 },
   { name: "Cempaka Putih", latitude: -6.1802, longitude: 106.8686, city: "Jakarta Pusat", normal_avg: 90, warning_threshold: 120, critical_threshold: 140 },

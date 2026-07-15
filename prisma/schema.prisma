@@ -17,6 +17,7 @@ model MasterArea {
   normal_avg         Float           @default(0)
   warning_threshold  Float           @default(0)
   critical_threshold Float           @default(0)
+  
   crowdPermits       CrowdPermit[]
   predictions        PredictionLog[]
 }
@@ -24,13 +25,15 @@ model MasterArea {
 model PredictionLog {
   id               Int        @id @default(autoincrement())
   areaId           Int
-  prediction_date  DateTime
+  prediction_date  DateTime   @db.Date 
   volume_ton       Float
   confidence_score Float
   risk_status      String     @db.VarChar(50)
   createdAt        DateTime   @default(now())
+  
   area             MasterArea @relation(fields: [areaId], references: [id])
 
+  @@unique([areaId, prediction_date], name: "unique_area_prediction_date") 
   @@index([areaId], map: "PredictionLog_areaId_fkey")
 }
 
@@ -38,12 +41,16 @@ model CrowdPermit {
   id              Int        @id @default(autoincrement())
   areaId          Int
   event_name      String
-  event_date      DateTime
+  // ✅ ARCHITECTURAL IMPROVEMENT: Sama seperti prediction, event_date sebaiknya hanya Date
+  event_date      DateTime   @db.Date
   estimated_crowd Int
   status          String     @db.VarChar(50)
   createdAt       DateTime   @default(now())
+  
   area            MasterArea @relation(fields: [areaId], references: [id])
 
+  // ✅ ARCHITECTURAL IMPROVEMENT: Mencegah event ganda di area & tanggal yang sama
+  @@unique([areaId, event_date], name: "unique_area_event_date")
   @@index([areaId], map: "CrowdPermit_areaId_fkey")
 }
 

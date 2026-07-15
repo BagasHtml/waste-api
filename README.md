@@ -1,16 +1,24 @@
-# 📚 Aeterna AI - Frontend Integration Guide (v4.2.0)
+# 📚 Aeterna AI - Frontend Integration Guide (v4.3.0)
 **Sistem Prediksi Manajemen Sampah DKI Jakarta 2026**
 
-Dokumen ini berisi panduan integrasi antara Backend API (Node.js Gateway) dan Frontend Dashboard. Seluruh endpoint telah distandarisasi mengikuti prinsip *Clean Architecture*, *Database-First Validation*, dan *Type-Safe Contract*.
+Dokumen ini berisi panduan integrasi antara Backend API (Node.js Gateway) dan Frontend Dashboard. Seluruh endpoint telah distandarisasi mengikuti prinsip *Clean Architecture*, *Database-First Validation*, *Type-Safe Contract*, dan **Idempotent Operations**.
 
 ## 🔐 Autentikasi & Keamanan
 Seluruh endpoint bisnis dilindungi menggunakan **API Key Authentication**.
--   **Header Name:** `x-api-key`
--   **Cakupan:** Wajib untuk semua endpoint di bawah `/api/v1/*`
--   **Pengecualian:** Endpoint `/status` bersifat **PUBLIK** (tidak memerlukan API Key).
--   **Response Gagal:** `401 Unauthorized` jika key tidak valid/hilang.
+- **Header Name:** `x-api-key`
+- **Cakupan:** Wajib untuk semua endpoint di bawah `/api/v1/*`
+- **Pengecualian:** Endpoint `/status` bersifat **PUBLIK** (tidak memerlukan API Key).
+- **Response Gagal:** `401 Unauthorized` jika key tidak valid/hilang.
 
 > ⚠️ **Security Notice:** Jangan pernah menuliskan API Key secara *hardcoded* di source code frontend. Selalu gunakan environment variable (misal: `VITE_API_KEY`).
+
+---
+
+## 🛡️ Jaminan Integritas Data & Idempotensi (Baru di v4.3.0)
+Backend kini dilengkapi dengan mekanisme **Idempotent** untuk mencegah kerusakan data akibat *double-click*, *spam request*, atau *race condition* dari frontend:
+1. **Anti-Duplikasi Prediksi:** Memanggil endpoint `/predict` berkali-kali untuk `location` dan `start_date` yang **sama** tidak akan membuat baris data baru. Backend akan secara otomatis **mengupdate** data yang sudah ada. Frontend dijamin hanya akan menerima **1 entri valid per hari per lokasi**, menjaga akurasi persentase dan grafik dashboard.
+2. **Anti-Duplikasi Event:** Logika yang sama diterapkan pada pembuatan `CrowdPermit`. Event dengan tanggal dan lokasi yang sama tidak akan tercatat ganda.
+3. **Keamanan Kapasitas TPA:** Endpoint `/predict` bersifat **hipotetis**. Ia **tidak akan** menambah (`increment`) beban fisik `current_load_ton` di fasilitas TPA. Kapasitas TPA hanya berubah melalui endpoint operasional nyata (bukan prediksi), mencegah inflasi data palsu.
 
 ---
 
@@ -25,7 +33,7 @@ Seluruh endpoint bisnis dilindungi menggunakan **API Key Authentication**.
 ---
 
 ## 🗺️ Konstanta Wilayah & Logistik
-Backend **hanya** mendukung **44 Kecamatan Administratif DKI Jakarta**. Venue/landmark (JIS, GBK, dll.) **tidak lagi didukung**.
+Backend **hanya** mendukung **44 Kecamatan Administratif DKI Jakarta**. Venue/landmark (JIS, GBK, dll.) **tidak lagi didukung** dan akan ditolak oleh validasi backend.
 
 Gunakan konstanta berikut untuk rendering peta (Leaflet.js) dan info rute:
 
@@ -63,162 +71,162 @@ export const LOGISTICS_ROUTING_PROFILES: Record<string, { distance: string; trav
 
 ### 1. Health Check (Publik)
 Memverifikasi status server dan kesiapan model AI.
--   **URL:** `/status`
--   **Method:** `GET`
--   **Auth:** ❌ Tidak Perlu
--   **Rate Limit:** 60 req/min
--   **Response Success (200):**
-    ```json
-    {
-      "status": "Online",
-      "model_chronos": "Chronos-T5 Tiny",
-      "model_gbr": "Gradient Boosting Regressor",
-      "calibrated": true
-    }
-    ```
+- **URL:** `/status`
+- **Method:** `GET`
+- **Auth:** ❌ Tidak Perlu
+- **Rate Limit:** 60 req/min
+- **Response Success (200):**
+  ```json
+  {
+    "status": "Online",
+    "model_chronos": "Chronos-T5 Tiny",
+    "model_gbr": "Gradient Boosting Regressor",
+    "calibrated": true
+  }
+  ```
 
-### 2. Prediksi AI (Core Engine)
-Endpoint utama untuk forecasting volume sampah, dekomposisi 8 jenis sampah, dan perencanaan logistik.
--   **URL:** `/api/v1/predict`
--   **Method:** `POST`
--   **Auth:** 🔒 `x-api-key`
--   **Rate Limit:** 10 req/min
--   **Request Body:**
-    ```json
-    {
-      "location": "Pademangan",
-      "forecast_days": 7,
-      "start_date": "2026-07-10",
-      "rainfall_mm": 15.5,
-      "event_scale": 2,
-      "granularity": "daily",
-      "model_type": "chronos"
-    }
-    ```
--   **Field Validation:**
-    -   `location`: String. **Hanya menerima nama 44 kecamatan administratif DKI Jakarta** (case-sensitive, harus persis dengan nama di database)
-    -   `forecast_days`: Integer 1–30
-    -   `granularity`: `'daily'` (default) | `'hourly'`
-    -   `model_type`: `'chronos'` (default) | `'gradient_boosting'`
+### 2. Prediksi AI (Core Engine) ✨ *Idempotent*
+Endpoint utama untuk forecasting volume sampah, dekomposisi 8 jenis sampah, dan perencanaan logistik. **Aman dari spam/double-click.**
+- **URL:** `/api/v1/predict`
+- **Method:** `POST`
+- **Auth:** 🔒 `x-api-key`
+- **Rate Limit:** 10 req/min
+- **Request Body:**
+  ```json
+  {
+    "location": "Pademangan",
+    "forecast_days": 7,
+    "start_date": "2026-07-10",
+    "rainfall_mm": 15.5,
+    "event_scale": 2,
+    "granularity": "daily",
+    "model_type": "chronos"
+  }
+  ```
+- **Field Validation:**
+  - `location`: String. **Hanya menerima nama 44 kecamatan administratif DKI Jakarta** (case-sensitive, harus persis dengan nama di database).
+  - `forecast_days`: Integer 1–30.
+  - `granularity`: `'daily'` (default) | `'hourly'`.
+  - `model_type`: `'chronos'` (default) | `'gradient_boosting'`.
 
--   **Response Success (200):**
-    ```json
-    {
-      "status": "success",
-      "message": "WARNING conditions expected.",
-      "confidence_score": 0.9325,
-      "data": {
-        "prediction_results": [
-          {
-            "date": "2026-07-10",
-            "location": "Pademangan",
-            "total_volume_ton": 12.45,
-            "organic_waste_ton": 6.21,
-            "plastic_waste_ton": 2.86,
-            "paper_waste_ton": 1.43,
-            "glass_waste_ton": 0.40,
-            "metal_waste_ton": 0.26,
-            "textile_waste_ton": 0.52,
-            "other_waste_ton": 0.77,
-            "recommended_trucks": 3,
-            "risk_status": "WARNING",
-            "event_info": "Event Skala 2",
-            "hourly_breakdown": null
-          }
-        ],
-        "logistics_plan": {
-          "trucks_needed": 3,
-          "manpower": 9,
-          "estimated_duration_hours": 24.5,
-          "efficiency_rate": "85% (Optimal)"
+- **Response Success (200):**
+  ```json
+  {
+    "status": "success",
+    "message": "WARNING conditions expected.",
+    "confidence_score": 0.9325,
+    "data": {
+      "prediction_results": [
+        {
+          "date": "2026-07-10",
+          "location": "Pademangan",
+          "total_volume_ton": 12.45,
+          "organic_waste_ton": 6.21,
+          "plastic_waste_ton": 2.86,
+          "paper_waste_ton": 1.43,
+          "glass_waste_ton": 0.40,
+          "metal_waste_ton": 0.26,
+          "textile_waste_ton": 0.52,
+          "other_waste_ton": 0.77,
+          "recommended_trucks": 3,
+          "risk_status": "WARNING",
+          "event_info": "Event Skala 2",
+          "hourly_breakdown": null
         }
+      ],
+      "logistics_plan": {
+        "trucks_needed": 3,
+        "manpower": 9,
+        "estimated_duration_hours": 24.5,
+        "efficiency_rate": "85% (Optimal)"
       }
     }
-    ```
+  }
+  ```
 
 ### 3. Export CSV
 Mengunduh hasil prediksi dalam format file `.csv`.
--   **URL:** `/api/v1/predict/csv`
--   **Method:** `POST`
--   **Auth:** 🔒 `x-api-key`
--   **Rate Limit:** 10 req/min
--   **Request Body:** Sama dengan `/predict`
--   **Response:** Binary stream (`text/csv`)
--   **⚠️ Penting untuk FE:** Wajib set `responseType: 'blob'` di Axios/Fetch.
+- **URL:** `/api/v1/predict/csv`
+- **Method:** `POST`
+- **Auth:** 🔒 `x-api-key`
+- **Rate Limit:** 10 req/min
+- **Request Body:** Sama dengan `/predict`
+- **Response:** Binary stream (`text/csv`)
+- **⚠️ Penting untuk FE:** Wajib set `responseType: 'blob'` di Axios/Fetch.
 
 ### 4. Berita Sampah Harian (Dynamic + Fallback)
 Mengambil berita persampahan DKI Jakarta. Sistem menggunakan mekanisme **AI-First with Local Fallback** untuk menjamin zero downtime.
--   **URL:** `/api/v1/news`
--   **Method:** `GET`
--   **Auth:** 🔒 `x-api-key`
--   **Rate Limit:** 30 req/min
--   **Response Success (200):**
-    ```json
-    [
-      {
-        "title": "DKI Uji Coba Penarikan Retribusi Sampah Pelayanan Kebersihan Harian",
-        "source": "Antara News",
-        "url": "https://www.antaranews.com/tag/sampah-jakarta",
-        "date_fetched": "2026-07-10",
-        "summary": "Pemprov DKI Jakarta merencanakan uji coba penarikan retribusi..."
-      }
-    ]
-    ```
+- **URL:** `/api/v1/news`
+- **Method:** `GET`
+- **Auth:** 🔒 `x-api-key`
+- **Rate Limit:** 30 req/min
+- **Response Success (200):**
+  ```json
+  [
+    {
+      "title": "DKI Uji Coba Penarikan Retribusi Sampah Pelayanan Kebersihan Harian",
+      "source": "Antara News",
+      "url": "https://www.antaranews.com/tag/sampah-jakarta",
+      "date_fetched": "2026-07-10",
+      "summary": "Pemprov DKI Jakarta merencanakan uji coba penarikan retribusi..."
+    }
+  ]
+  ```
 > 💡 **Catatan FE:** Jika AI Service gagal/timeout (>8 detik), backend otomatis mengembalikan data cache lokal tanpa error. FE tidak perlu menangani fallback secara manual.
 
 ### 5. Autopilot Dashboard (With Coordinates)
 Mengambil prediksi otonom agregat untuk seluruh 44 kecamatan DKI Jakarta hari ini. **Menyertakan koordinat** untuk rendering peta langsung.
--   **URL:** `/api/v1/autopilot`
--   **Method:** `GET`
--   **Auth:** 🔒 `x-api-key`
--   **Rate Limit:** 30 req/min
--   **Response Success (200):**
-    ```json
-    {
-      "status": "success",
-      "date": "2026-07-10",
-      "total_volume_ton": 8105.42,
-      "total_trucks": 1640,
-      "top_kecamatan": [
-        {
-          "location": "Cakung",
-          "latitude": -6.1828,
-          "longitude": 106.9482,
-          "volume_ton": 355.20,
-          "trucks": 72,
-          "status": "SAFE",
-          "city": "Jakarta Timur"
-        }
-      ],
-      "rainy_regions": 0,
-      "event_today": null
-    }
-    ```
+- **URL:** `/api/v1/autopilot`
+- **Method:** `GET`
+- **Auth:** 🔒 `x-api-key`
+- **Rate Limit:** 30 req/min
+- **Response Success (200):**
+  ```json
+  {
+    "status": "success",
+    "date": "2026-07-10",
+    "total_volume_ton": 8105.42,
+    "total_trucks": 1640,
+    "top_kecamatan": [
+      {
+        "location": "Cakung",
+        "latitude": -6.1828,
+        "longitude": 106.9482,
+        "volume_ton": 355.20,
+        "trucks": 72,
+        "status": "SAFE",
+        "city": "Jakarta Timur"
+      }
+    ],
+    "rainy_regions": 0,
+    "event_today": null
+  }
+  ```
 
 ### 6. Alerts Operasional
 Mengambil daftar lokasi dengan status WARNING/CRITICAL dalam 3 hari ke depan.
--   **URL:** `/api/v1/alerts`
--   **Method:** `GET`
--   **Auth:** 🔒 `x-api-key`
--   **Rate Limit:** 30 req/min
--   **Query Params:** `location` (opsional, filter per kecamatan)
--   **Response Success (200):**
-    ```json
-    {
-      "status": "success",
-      "alert_count": 1,
-      "alerts": [
-        {
-          "date": "2026-07-11",
-          "location": "Tanah Abang",
-          "status": "CRITICAL",
-          "estimated_volume_ton": 18.50,
-          "message": "Alert: CRITICAL volume expected at Tanah Abang"
-        }
-      ],
-      "last_updated": "2026-07-10T08:30:00.000Z"
-    }
-    ```
+- **URL:** `/api/v1/alerts`
+- **Method:** `GET`
+- **Auth:** 🔒 `x-api-key`
+- **Rate Limit:** 30 req/min
+- **Query Params:** `location` (opsional, filter per kecamatan)
+- **Response Success (200):**
+  ```json
+  {
+    "status": "success",
+    "alert_count": 1,
+    "alerts": [
+      {
+        "date": "2026-07-11",
+        "location": "Tanah Abang",
+        "status": "CRITICAL",
+        "estimated_volume_ton": 18.50,
+        "message": "Alert: CRITICAL volume expected at Tanah Abang"
+      }
+    ],
+    "last_updated": "2026-07-10T08:30:00.000Z"
+  }
+  ```
 
 ---
 
@@ -276,13 +284,7 @@ data.top_kecamatan.forEach(item => {
 | Endpoint Group | Limit | Alasan |
 | :--- | :--- | :--- |
 | `/predict`, `/predict/csv` | 10 req/min | AI inference berat & mahal |
-| `/alerts`, `/news`, `/autopilot` | 30 req/min | DB query ringan |
+| `/alerts`, `/news`, `/autopilot` | 30 req/min | DB query ringan (dengan caching) |
 | `/status` | 60 req/min | Health check monitoring |
 
-> 💡 **Tips FE:** Gunakan debouncing/throttling pada tombol prediksi dan implementasi retry logic dengan exponential backoff saat menerima `429`.
-
----
-
-## 👨‍💻 Developer Contact
-**System Architect:** BagasHtml (@BagasHtml)
-**AI & Backend Lead:** Faril Putra Pratama (@FARILtau72)
+> 💡 **Tips FE:** Gunakan **debouncing** pada tombol prediksi (tunggu 1 detik setelah user berhenti mengetik/mengklik) dan implementasi retry logic dengan exponential backoff saat menerima `429`.
